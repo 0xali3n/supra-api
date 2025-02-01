@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import  { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Copy,
   Check,
@@ -6,9 +7,8 @@ import {
   ChevronDown,
   ChevronUp,
   Play,
+  AlertCircle,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import ApiRequestResponse from "../components/ApiRequestResponse";
 
 interface EndpointProps {
   method: string;
@@ -23,16 +23,14 @@ interface EndpointProps {
   exampleResponse: object;
 }
 
-const ApiDocumentation: React.FC = () => {
-  const [copiedText, setCopiedText] = useState<string>("");
+const ApiDocumentation = () => {
+  const [copiedText, setCopiedText] = useState("");
   const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState<string>("");
-  const [addressInputs, setAddressInputs] = useState<{ [key: string]: string }>(
-    {}
-  );
-  const [responses, setResponses] = useState<{ [key: string]: object | null }>(
-    {}
-  );
+  const [apiKey, setApiKey] = useState("");
+  const [addressInputs, setAddressInputs] = useState<{ [key: string]: string }>({});
+  const [responses, setResponses] = useState<{ [key: string]: any }>({});
+  const [loading, setLoading] = useState<{ [key: string]: boolean }>({});
+  const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const copyToClipboard = async (text: string) => {
     await navigator.clipboard.writeText(text);
@@ -40,12 +38,45 @@ const ApiDocumentation: React.FC = () => {
     setTimeout(() => setCopiedText(""), 2000);
   };
 
-  const handleExecute = (endpoint: string, exampleResponse: object) => {
-    // Simulate API call
-    setResponses({
-      ...responses,
-      [endpoint]: exampleResponse,
-    });
+  const handleExecute = async (endpoint: string, method: string, path: string) => {
+    if (!apiKey) {
+      setErrors({ ...errors, [endpoint]: "API key is required" });
+      return;
+    }
+
+    setLoading({ ...loading, [endpoint]: true });
+    setErrors({ ...errors, [endpoint]: "" });
+
+    const baseUrl = "https://api.suprascan.fun/api";
+    const requestUrl = path.replace("{address}", addressInputs[endpoint] || "");
+
+    try {
+      const response = await fetch(`${baseUrl}${requestUrl}`, {
+        method,
+        headers: {
+          "accept": "application/json",
+          "x-api-key": apiKey
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "An error occurred");
+      }
+
+      setResponses({
+        ...responses,
+        [endpoint]: data
+      });
+    } catch (error) {
+      setErrors({
+        ...errors,
+        [endpoint]: error instanceof Error ? error.message : "An error occurred"
+      });
+    } finally {
+      setLoading({ ...loading, [endpoint]: false });
+    }
   };
 
   const endpoints: EndpointProps[] = [
@@ -130,9 +161,16 @@ const ApiDocumentation: React.FC = () => {
     },
     {
       method: "GET",
-      path: "/tokens/pools",
+      path: "/tokens/pools?address={address}",
       description: "Get information about token pools",
-      parameters: [],
+      parameters: [
+        {
+          name: "address",
+          type: "string",
+          required: true,
+          description: "Wallet address to query",
+        },
+      ],
       exampleResponse: {
         status: "success",
         data: {
@@ -149,9 +187,16 @@ const ApiDocumentation: React.FC = () => {
     },
     {
       method: "GET",
-      path: "/tokens/list",
+      path: "/tokens/list?address={address}",
       description: "Get a list of available tokens",
-      parameters: [],
+      parameters: [
+        {
+          name: "address",
+          type: "string",
+          required: true,
+          description: "Wallet address to query",
+        },
+      ],
       exampleResponse: {
         status: "success",
         data: {
@@ -166,6 +211,60 @@ const ApiDocumentation: React.FC = () => {
       },
     },
   ];
+
+  const RequestResponse = ({ endpoint, method, path }: { endpoint: string, method: string, path: string }) => (
+    <div className="mt-4 space-y-4">
+      <div>
+        <h4 className="text-sm font-medium text-gray-700 mb-2">Request Details</h4>
+        <pre className="bg-gray-50 p-4 rounded-lg overflow-x-auto">
+          <code className="text-sm">
+            {`curl -X ${method} \\\n` +
+              `'https://api.suprascan.fun/api${path.replace("{address}", addressInputs[endpoint] || "")}' \\\n` +
+              `-H 'accept: application/json' \\\n` +
+              `-H 'x-api-key: ${apiKey}'`}
+          </code>
+        </pre>
+      </div>
+
+      {loading[endpoint] && (
+        <div className="flex items-center justify-center py-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+        </div>
+      )}
+
+      {errors[endpoint] && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative">
+          <div className="flex items-center">
+            <AlertCircle className="h-4 w-4 mr-2" />
+            <span>{errors[endpoint]}</span>
+          </div>
+        </div>
+      )}
+
+      {responses[endpoint] && !loading[endpoint] && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-medium text-gray-700">Response</h4>
+            <button
+              onClick={() => copyToClipboard(JSON.stringify(responses[endpoint], null, 2))}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              {copiedText === JSON.stringify(responses[endpoint], null, 2) ? (
+                <Check className="w-5 h-5 text-green-500" />
+              ) : (
+                <Copy className="w-5 h-5 text-gray-500" />
+              )}
+            </button>
+          </div>
+          <div className="bg-gray-50 rounded-lg">
+            <pre className="p-4 overflow-auto max-h-[400px]">
+              <code className="text-sm">{JSON.stringify(responses[endpoint], null, 2)}</code>
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-50">
@@ -317,36 +416,73 @@ const ApiDocumentation: React.FC = () => {
                             placeholder={`Enter ${param.name}`}
                             className="w-full p-2 border border-gray-200 rounded-lg"
                           />
+                          <p className="text-sm text-gray-500 mt-1">
+                            {param.description}
+                          </p>
                         </div>
                       ))}
 
                       {/* Execute Button */}
                       <button
-                        onClick={() =>
-                          handleExecute(endpoint.path, endpoint.exampleResponse)
-                        }
-                        className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 py-2 rounded-lg hover:shadow-md transition-all duration-300"
+                        onClick={() => handleExecute(endpoint.path, endpoint.method, endpoint.path)}
+                        disabled={loading[endpoint.path]}
+                        className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 py-2 rounded-lg hover:shadow-md transition-all duration-300 disabled:opacity-50"
                       >
                         <Play className="w-4 h-4" />
-                        Execute
+                        {loading[endpoint.path] ? "Executing..." : "Execute"}
                       </button>
 
+                      {/* Example Response */}
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-700 mb-2">Example Response</h4>
+                        <pre className="bg-gray-50 p-4 rounded-lg overflow-x-auto">
+                          <code className="text-sm">
+                            {JSON.stringify(endpoint.exampleResponse, null, 2)}
+                          </code>
+                        </pre>
+                      </div>
+
                       {/* Request and Response */}
-                      {responses[endpoint.path] && (
-                        <ApiRequestResponse
-                          method={endpoint.method}
-                          path={endpoint.path}
-                          apiKey={apiKey}
-                          addressInput={addressInputs[endpoint.path]}
-                          response={responses[endpoint.path]}
-                        />
-                      )}
+                      <RequestResponse
+                        endpoint={endpoint.path}
+                        method={endpoint.method}
+                        path={endpoint.path}
+                      />
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
           ))}
+        </motion.div>
+        {/* Footer Documentation */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="mt-16 p-6 bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-gray-100"
+        >
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">
+            Additional Information
+          </h2>
+          <div className="space-y-4 text-gray-600">
+            <p>
+              Rate limits: 100 requests per minute per API key. Please contact support
+              for increased limits.
+            </p>
+            <p>
+              All timestamps are returned in ISO 8601 format in UTC timezone.
+            </p>
+            <p>
+              For technical support or questions, please reach out to{" "}
+              <a
+                href="mailto:api-support@suprascan.fun"
+                className="text-orange-600 hover:text-orange-700"
+              >
+                api-support@suprascan.fun
+              </a>
+            </p>
+          </div>
         </motion.div>
       </div>
     </div>
